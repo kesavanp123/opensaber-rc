@@ -9,12 +9,10 @@ import io.opensaber.pojos.ResponseParams;
 import io.opensaber.pojos.attestation.AttestationPolicy;
 import io.opensaber.registry.dao.NotFoundException;
 import io.opensaber.registry.exception.RecordNotFoundException;
+import io.opensaber.registry.helper.RegistryHelper;
 import io.opensaber.registry.middleware.MiddlewareHaltException;
 import io.opensaber.registry.middleware.util.Constants;
 import io.opensaber.registry.middleware.util.JSONUtil;
-import io.opensaber.registry.transform.Configuration;
-import io.opensaber.registry.transform.Data;
-import io.opensaber.registry.transform.ITransformer;
 import io.opensaber.validators.ValidationException;
 import org.keycloak.KeycloakPrincipal;
 import org.keycloak.adapters.springsecurity.token.KeycloakAuthenticationToken;
@@ -36,7 +34,6 @@ public class RegistryEntityController extends AbstractController {
     @RequestMapping(value = "/api/v1/{entityName}/invite", method = RequestMethod.POST)
     public ResponseEntity<Object> invite(
             @PathVariable String entityName,
-            @RequestHeader HttpHeaders header,
             @RequestBody JsonNode rootNode
     ) throws Exception {
         final String TAG = "RegistryController:invite";
@@ -63,7 +60,7 @@ public class RegistryEntityController extends AbstractController {
     }
 
     @RequestMapping(value = "/api/v1/{entityName}/search", method = RequestMethod.POST)
-    public ResponseEntity<Object> searchEntity(@PathVariable String entityName, @RequestHeader HttpHeaders header, @RequestBody ObjectNode searchNode) {
+    public ResponseEntity<Object> searchEntity(@PathVariable String entityName, @RequestBody ObjectNode searchNode) {
 
         ResponseParams responseParams = new ResponseParams();
         Response response = new Response(Response.API_ID.SEARCH, "OK", responseParams);
@@ -107,8 +104,8 @@ public class RegistryEntityController extends AbstractController {
         try {
             String tag = "RegistryController.update " + entityName;
             watch.start(tag);
-            // TODO: get userID from auth header
-            registryHelper.updateEntityAndState(newRootNode, "");
+            String userId = registryHelper.getKeycloakUserId(request);
+            registryHelper.updateEntityAndState(newRootNode, userId);
             responseParams.setErrmsg("");
             responseParams.setStatus(Response.Status.SUCCESSFUL);
             watch.stop(tag);
@@ -124,7 +121,6 @@ public class RegistryEntityController extends AbstractController {
     @RequestMapping(value = "/api/v1/{entityName}", method = RequestMethod.POST)
     public ResponseEntity<Object> postEntity(
             @PathVariable String entityName,
-            @RequestHeader HttpHeaders header,
             @RequestBody JsonNode rootNode,
             HttpServletRequest request
     ) {
@@ -137,7 +133,8 @@ public class RegistryEntityController extends AbstractController {
 
         try {
             registryHelper.authorizeUser(request, entityName);
-            String label = registryHelper.addEntity(newRootNode, ""); //todo add user id from auth scope.
+            String userId = registryHelper.getKeycloakUserId(request);
+            String label = registryHelper.addEntity(newRootNode, userId);
             Map resultMap = new HashMap();
             resultMap.put(dbConnectionInfoMgr.getUuidPropertyName(), label);
             result.put(entityName, resultMap);
@@ -163,14 +160,13 @@ public class RegistryEntityController extends AbstractController {
             HttpServletRequest request,
             @PathVariable String entityName,
             @PathVariable String entityId,
-            @RequestHeader HttpHeaders header,
             @RequestBody JsonNode requestBody
     ) {
         String propertyURI = request.getRequestURI().split("attest/")[1];
         logger.info("Received response to raise claim for entityName: {}, entityId: {}, propertyURI: {}", entityName, entityId, propertyURI);
-        // TODO: fetch user details from JWT
         try {
-            registryHelper.attest(entityName, entityId, propertyURI, requestBody);
+            String userId = registryHelper.getKeycloakUserId(request);
+            registryHelper.attest(entityName, entityId, propertyURI, requestBody, userId);
             return new ResponseEntity<>(HttpStatus.OK);
         } catch (Exception e) {
             e.printStackTrace();
@@ -183,7 +179,6 @@ public class RegistryEntityController extends AbstractController {
             HttpServletRequest request,
             @PathVariable String entityName,
             @PathVariable String entityId,
-            @RequestHeader HttpHeaders header,
             @RequestBody JsonNode requestBody,
             @RequestParam Optional<Boolean> send
 
@@ -201,12 +196,13 @@ public class RegistryEntityController extends AbstractController {
             watch.start(tag);
             String notes = getNotes(requestBody);
             requestBody = registryHelper.removeFormatAttr(requestBody);
-            registryHelper.updateEntityProperty(entityName, entityId, propertyURI, requestBody);
+            String userId = registryHelper.getKeycloakUserId(request);
+            registryHelper.updateEntityProperty(entityName, entityId, propertyURI, requestBody, userId);
             responseParams.setErrmsg("");
             responseParams.setStatus(Response.Status.SUCCESSFUL);
             watch.stop(tag);
             if (send.isPresent() && send.get()) {
-                registryHelper.sendForAttestation(entityName, entityId, propertyURI, notes);
+                registryHelper.sendForAttestation(entityName, entityId, propertyURI, notes, userId);
             }
             return new ResponseEntity<>(response, HttpStatus.OK);
         } catch (Exception e) {
@@ -222,8 +218,7 @@ public class RegistryEntityController extends AbstractController {
             HttpServletRequest request,
             @PathVariable String entityName,
             @PathVariable String entityId,
-            @RequestBody JsonNode requestBody,
-            @RequestHeader HttpHeaders header
+            @RequestBody JsonNode requestBody
     ) {
         ResponseParams responseParams = new ResponseParams();
         Response response = new Response(Response.API_ID.UPDATE, "OK", responseParams);
@@ -237,7 +232,8 @@ public class RegistryEntityController extends AbstractController {
             String tag = "RegistryController.sendForVerification " + entityName;
             watch.start(tag);
             String notes = getNotes(requestBody);
-            registryHelper.sendForAttestation(entityName, entityId, propertyURI, notes);
+            String userId = registryHelper.getKeycloakUserId(request);
+            registryHelper.sendForAttestation(entityName, entityId, propertyURI, notes, userId);
             responseParams.setStatus(Response.Status.SUCCESSFUL);
             watch.stop(tag);
             return new ResponseEntity<>(response, HttpStatus.OK);
@@ -253,7 +249,6 @@ public class RegistryEntityController extends AbstractController {
             HttpServletRequest request,
             @PathVariable String entityName,
             @PathVariable String entityId,
-            @RequestHeader HttpHeaders header,
             @RequestBody JsonNode requestBody,
             @RequestParam Optional<Boolean> send
     ) {
@@ -270,12 +265,13 @@ public class RegistryEntityController extends AbstractController {
             watch.start(tag);
             String notes = getNotes(requestBody);
             requestBody = registryHelper.removeFormatAttr(requestBody);
-            registryHelper.addEntityProperty(entityName, entityId, propertyURI, requestBody);
+            String userId = registryHelper.getKeycloakUserId(request);
+            registryHelper.addEntityProperty(entityName, entityId, propertyURI, requestBody, userId);
             responseParams.setErrmsg("");
             responseParams.setStatus(Response.Status.SUCCESSFUL);
             if (send.isPresent() && send.get()) {
-                String propertyId = registryHelper.getPropertyIdAfterSavingTheProperty(entityName, entityId, requestBody, propertyURI);
-                registryHelper.sendForAttestation(entityName, entityId, propertyURI + "/" + propertyId, notes);
+                String propertyId = registryHelper.getPropertyIdAfterSavingTheProperty(entityName, entityId, requestBody, propertyURI, userId);
+                registryHelper.sendForAttestation(entityName, entityId, propertyURI + "/" + propertyId, notes, userId);
             }
             watch.stop(tag);
             return new ResponseEntity<>(response, HttpStatus.OK);
@@ -367,7 +363,7 @@ public class RegistryEntityController extends AbstractController {
         Response response = new Response(Response.API_ID.READ, "OK", responseParams);
         try {
             String userId = registryHelper.getKeycloakUserId(request);
-            JsonNode node = getEntityJsonNode(entityName, entityId, requireLDResponse, userId);
+            JsonNode node = RegistryHelper.getEntityJsonNode(configurationHelper, registryHelper, transformer, entityName, entityId, requireLDResponse, userId);
             return new ResponseEntity<>(node, HttpStatus.OK);
 
         } catch (NotFoundException e) {
@@ -382,30 +378,15 @@ public class RegistryEntityController extends AbstractController {
         }
     }
 
-    private JsonNode getEntityJsonNode(@PathVariable String entityName, @PathVariable String entityId, boolean requireLDResponse, String userId) throws Exception {
-        JsonNode resultNode = registryHelper.readEntity(userId, entityName, entityId, false, null, false);
-        // Transformation based on the mediaType
-        Data<Object> data = new Data<>(resultNode);
-        Configuration config = configurationHelper.getResponseConfiguration(requireLDResponse);
-
-        ITransformer<Object> responseTransformer = transformer.getInstance(config);
-        Data<Object> resultContent = responseTransformer.transform(data);
-        logger.info("ReadEntity,{},{}", entityId, resultContent);
-        if (!(resultContent.getData() instanceof JsonNode)) {
-            throw new RuntimeException("Unknown response object " + resultContent);
-        }
-        JsonNode node = (JsonNode) resultContent.getData();
-        return node.get(entityName);
-    }
-
     @RequestMapping(value = "/api/v1/{entityName}", method = RequestMethod.GET)
     public ResponseEntity<Object> getEntityByToken(@PathVariable String entityName, HttpServletRequest request) {
         ResponseParams responseParams = new ResponseParams();
         Response response = new Response(Response.API_ID.SEARCH, "OK", responseParams);
         try {
             JsonNode result = registryHelper.getRequestedUserDetails(request, entityName);
+            String userId = registryHelper.getKeycloakUserId(request);
             if (result.get(entityName).size() > 0) {
-                ArrayNode responseFromDb = registryHelper.fetchFromDBUsingEsResponse(entityName, (ArrayNode) result.get(entityName));
+                ArrayNode responseFromDb = registryHelper.fetchFromDBUsingEsResponse(entityName, (ArrayNode) result.get(entityName), userId);
                 return new ResponseEntity<>(responseFromDb, HttpStatus.OK);
             } else {
                 responseParams.setErrmsg("Entity not found");
@@ -447,7 +428,6 @@ public class RegistryEntityController extends AbstractController {
     public ResponseEntity<Object> attestEntity(
             @PathVariable String entityName,
             @PathVariable String entityId,
-            @RequestHeader HttpHeaders header,
             @RequestBody JsonNode rootNode
     ) throws Exception {
         logger.info("Attestation request for {}", rootNode.get("fieldPaths"));

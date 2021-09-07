@@ -221,7 +221,7 @@ public class RegistryHelperTest {
         student.set("Student", studentNodeContent);
         when(readService.getEntity(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any())).thenReturn(student);
         when(definitionsManager.getDefinition(any()).getOsSchemaConfiguration().getSystemFields()).thenReturn(Arrays.asList("_osUpdatedAt", "_osCreatedAt"));
-        String propertyId = registryHelper.getPropertyIdAfterSavingTheProperty(entityName, entityId, requestBody, propertyURI);
+        String propertyId = registryHelper.getPropertyIdAfterSavingTheProperty(entityName, entityId, requestBody, propertyURI, "");
         String actualPropertyId = "12345";
         Assert.assertEquals(propertyId, actualPropertyId);
     }
@@ -276,7 +276,7 @@ public class RegistryHelperTest {
         student.set("Student", studentNodeContent);
         when(definitionsManager.getDefinition(any()).getOsSchemaConfiguration().getSystemFields()).thenReturn(Arrays.asList("_osUpdatedAt", "_osCreatedAt"));
         when(readService.getEntity(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any())).thenReturn(student);
-        String propertyId = registryHelper.getPropertyIdAfterSavingTheProperty(entityName, entityId, requestBody, propertyURI);
+        String propertyId = registryHelper.getPropertyIdAfterSavingTheProperty(entityName, entityId, requestBody, propertyURI, "");
         String actualPropertyId = "1-7d9dfb25-7789-44da-a6d4-eacf93e3a7aa";
         assertEquals(propertyId, actualPropertyId);
     }

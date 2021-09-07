@@ -24,6 +24,7 @@ import io.opensaber.registry.service.ISearchService;
 import io.opensaber.registry.service.RegistryService;
 import io.opensaber.registry.sink.shard.Shard;
 import io.opensaber.registry.sink.shard.ShardManager;
+import io.opensaber.registry.transform.*;
 import io.opensaber.registry.util.*;
 import io.opensaber.validators.IValidate;
 import io.opensaber.views.ViewTemplate;
@@ -111,6 +112,22 @@ public class RegistryHelper {
 
     @Autowired
     private EntityTypeHandler entityTypeHandler;
+
+    public static JsonNode getEntityJsonNode(ConfigurationHelper configurationHelper, RegistryHelper registryHelper, Transformer transformer, String entityName, String entityId, boolean requireLDResponse, String userId) throws Exception {
+        JsonNode resultNode = registryHelper.readEntity(userId, entityName, entityId, false, null, false);
+        // Transformation based on the mediaType
+        Data<Object> data = new Data<>(resultNode);
+        Configuration config = configurationHelper.getResponseConfiguration(requireLDResponse);
+
+        ITransformer<Object> responseTransformer = transformer.getInstance(config);
+        Data<Object> resultContent = responseTransformer.transform(data);
+        logger.info("ReadEntity,{},{}", entityId, resultContent);
+        if (!(resultContent.getData() instanceof JsonNode)) {
+            throw new RuntimeException("Unknown response object " + resultContent);
+        }
+        JsonNode node = (JsonNode) resultContent.getData();
+        return node.get(entityName);
+    }
 
     public JsonNode removeFormatAttr(JsonNode requestBody) {
         String documents = "documents";
@@ -321,8 +338,8 @@ public class RegistryHelper {
         return updateEntity(updatedNode, userId);
     }
 
-    public void addEntityProperty(String entityName, String entityId, String propertyURI, JsonNode inputJson) throws Exception {
-        JsonNode existingNode = readEntity("", entityName, entityId, false, null, false);
+    public void addEntityProperty(String entityName, String entityId, String propertyURI, JsonNode inputJson, String userId) throws Exception {
+        JsonNode existingNode = readEntity(userId, entityName, entityId, false, null, false);
         JsonNode updateNode = existingNode.deepCopy();
 
         JsonPointer propertyURIPointer = JsonPointer.compile("/" + propertyURI);
@@ -333,7 +350,7 @@ public class RegistryHelper {
         JsonNode propertyNode = parentNode.get(propertyName);
 
         createOrUpdateProperty(entityName, inputJson, updateNode, propertyName, (ObjectNode) parentNode, propertyNode);
-        updateEntityAndState(existingNode, updateNode, "");
+        updateEntityAndState(existingNode, updateNode, userId);
     }
 
     private void createOrUpdateProperty(String entityName, JsonNode inputJson, JsonNode updateNode, String propertyName, ObjectNode parentNode, JsonNode propertyNode) throws JsonProcessingException {
@@ -386,8 +403,8 @@ public class RegistryHelper {
         return parentNode;
     }
 
-    public void updateEntityProperty(String entityName, String entityId, String propertyURI, JsonNode inputJson) throws Exception {
-        JsonNode existingNode = readEntity("", entityName, entityId, false, null, false);
+    public void updateEntityProperty(String entityName, String entityId, String propertyURI, JsonNode inputJson, String userId) throws Exception {
+        JsonNode existingNode = readEntity(userId, entityName, entityId, false, null, false);
         JsonNode updateNode = existingNode.deepCopy();
 
         Optional<EntityPropertyURI> entityPropertyURI = EntityPropertyURI
@@ -409,7 +426,7 @@ public class RegistryHelper {
             int propertyIndex = Integer.parseInt(propertyName);
             ((ArrayNode) propertyParentNode).set(propertyIndex, inputJson);
         }
-        updateEntityAndState(existingNode, updateNode, "");
+        updateEntityAndState(existingNode, updateNode, userId);
     }
 
     public void attestEntity(String entityName, JsonNode node, String[] jsonPaths, String userId) throws Exception {
@@ -418,14 +435,14 @@ public class RegistryHelper {
         updateEntity(node, userId);
     }
 
-    public void sendForAttestation(String entityName, String entityId, String propertyURI, String notes) throws Exception {
-        JsonNode entityNode = readEntity("", entityName, entityId, false, null, false);
+    public void sendForAttestation(String entityName, String entityId, String propertyURI, String notes, String userId) throws Exception {
+        JsonNode entityNode = readEntity(userId, entityName, entityId, false, null, false);
         JsonNode updatedNode = entityStateHelper.sendForAttestation(entityNode, propertyURI, notes);
-        updateEntity(updatedNode, "");
+        updateEntity(updatedNode, userId);
     }
 
-    public void attest(String entityName, String entityId, String uuidPath, JsonNode attestReq) throws Exception {
-        JsonNode entityNode = readEntity("", entityName, entityId, false, null, false);
+    public void attest(String entityName, String entityId, String uuidPath, JsonNode attestReq, String userId) throws Exception {
+        JsonNode entityNode = readEntity(userId, entityName, entityId, false, null, false);
         JsonNode updatedNode;
         if (attestReq.get("action").asText().equals(Action.GRANT_CLAIM.toString())) {
             updatedNode = entityStateHelper.grantClaim(entityNode, uuidPath, attestReq.get("notes").asText());
@@ -434,7 +451,7 @@ public class RegistryHelper {
             updatedNode = entityStateHelper.rejectClaim(entityNode, uuidPath, attestReq.get("notes").asText());
             sendNotificationToOwners(updatedNode, CLAIM_REJECTED, String.format(CLAIM_STATUS_SUBJECT_TEMPLATE, CLAIM_REJECTED), String.format(CLAIM_STATUS_BODY_TEMPLATE, CLAIM_REJECTED));
         }
-        updateEntity(updatedNode, "");
+        updateEntity(updatedNode, userId);
     }
 
     /**
@@ -523,8 +540,8 @@ public class RegistryHelper {
         }
     }
 
-    public String getPropertyIdAfterSavingTheProperty(String entityName, String entityId, JsonNode requestBody, String propertyURI) throws Exception {
-        JsonNode resultNode = readEntity("", entityName, entityId, false, null, false)
+    public String getPropertyIdAfterSavingTheProperty(String entityName, String entityId, JsonNode requestBody, String propertyURI, String userId) throws Exception {
+        JsonNode resultNode = readEntity(userId, entityName, entityId, false, null, false)
                 .get(entityName);
         JsonNode jsonNode = resultNode.get(propertyURI);
         List<String> fieldsToRemove = getFieldsToRemove(entityName);
@@ -554,10 +571,10 @@ public class RegistryHelper {
         return fieldsToRemove;
     }
 
-    public ArrayNode fetchFromDBUsingEsResponse(String entity, ArrayNode esSearchResponse) throws Exception {
+    public ArrayNode fetchFromDBUsingEsResponse(String entity, ArrayNode esSearchResponse, String userId) throws Exception {
         ArrayNode result = objectMapper.createArrayNode();
         for (JsonNode value : esSearchResponse) {
-            JsonNode dbResponse = readEntity("", entity, value.get(uuidPropertyName).asText(), false, null, false);
+            JsonNode dbResponse = readEntity(userId, entity, value.get(uuidPropertyName).asText(), false, null, false);
             result.add(dbResponse.get(entity));
         }
         return result;
